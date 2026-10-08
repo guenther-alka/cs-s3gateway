@@ -144,8 +144,9 @@ RustFS' own web console cannot show a foreign S3 endpoint, that is why the gatew
 Path style addressing only (`https://host:9100/bucket/key`), region `us-east-1`. For a self-signed certificate import
 it or disable verification in the client.
 
-**WinSCP** - File protocol *Amazon S3*, host name and port 9100, access key `s3admin` + secret, Advanced >
-Environment > S3 > URL style **Path**; untick *Verify TLS certificate* for a self-signed certificate.
+**WinSCP** (tested, works) - File protocol *Amazon S3*, host name and port 9100, access key `s3admin` + secret,
+Advanced > Environment > S3 > URL style **Path** (required: WinSCP defaults to virtual-host style, which the
+gateway does not support, so *Path* must be selected); untick *Verify TLS certificate* for a self-signed certificate.
 
 **rclone**
 
@@ -249,7 +250,7 @@ bucket name validation and the web page (login, HTML escaping, download headers,
 * read only by design - no uploads, no delete, no multipart, no versioning, no per-user accounts or bucket policies
 * one set of credentials (the admin keys of RustFS)
 * path style addressing only (no `bucket.host` virtual hosts)
-* tested with the Go test suite, boto3 and the browser page on Windows; symlink handling and ZFS snapshot
+* tested with the Go test suite, boto3, **WinSCP (URL style Path)** and the browser page on Windows; symlink handling and ZFS snapshot
   auto-mount behaviour on Linux and illumos still need field tests - reports welcome
 
 ## License
