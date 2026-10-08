@@ -23,7 +23,10 @@ import (
 	"time"
 )
 
-const version = "0.2.1"
+const version = "0.3.0"
+
+// kindSnap only exists while adding buckets: a plain bucket rooted in <dataset>/.zfs/snapshot
+const kindSnap = 100
 
 type stringList []string
 
@@ -45,7 +48,7 @@ func main() {
 }
 
 func run() error {
-	var buckets, snaps stringList
+	var buckets, snaps, rusts, rustsnaps stringList
 	listen := flag.String("listen", ":9100", "listen address")
 	base := flag.String("base", defaultBase(), "napp-it CS folder; credentials and PEM are taken from its _cfg")
 	credsFrom := flag.String("creds-from", "", "file with the RustFS secret in its first line (default <base>/_cfg/server.auth)")
@@ -59,6 +62,8 @@ func run() error {
 	showVer := flag.Bool("version", false, "print version")
 	flag.Var(&buckets, "bucket", "name=folder  export a folder as bucket (repeatable)")
 	flag.Var(&snaps, "snaps", "name=dataset-mountpoint  export <mountpoint>/.zfs/snapshot as bucket (repeatable)")
+	flag.Var(&rusts, "rust", "name=folder  export a RustFS data folder (single disk) as bucket, objects shown as normal files (repeatable)")
+	flag.Var(&rustsnaps, "rustsnaps", "name=dataset-mountpoint  like --rust for <mountpoint>/.zfs/snapshot/<snap>/<rustfs-bucket>/... (repeatable)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "cs-s3gateway %s - read-only S3 gateway for folders and ZFS snapshots\n\nusage: cs-s3gateway [flags]\n\n", version)
 		flag.PrintDefaults()
@@ -110,7 +115,7 @@ func run() error {
 	}
 
 	// buckets
-	if len(buckets)+len(snaps) == 0 {
+	if len(buckets)+len(snaps)+len(rusts)+len(rustsnaps) == 0 {
 		return errors.New("no bucket configured, use --bucket name=folder or --snaps name=dataset-mountpoint")
 	}
 	g := &gateway{buckets: map[string]*bucket{}, access: access, secret: secret, maxKeys: *maxKeys,
@@ -125,7 +130,8 @@ func run() error {
 	if *keyF != "" {
 		protected = append(protected, *keyF)
 	}
-	add := func(spec string, snap bool) error {
+	add := func(spec string, kind int) error {
+		snap := kind == kindSnap || kind == kindRustSnap
 		name, p, err := parseSpec(spec)
 		if err != nil {
 			return err
@@ -150,16 +156,33 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("bucket %q: %w", name, err)
 		}
-		g.buckets[name] = &bucket{name: name, path: p, root: root}
+		bk := &bucket{name: name, path: p, root: root}
+		switch kind {
+		case kindRust:
+			bk.kind = kindRust
+		case kindRustSnap:
+			bk.kind, bk.bucketIdx = kindRustSnap, 1
+		}
+		g.buckets[name] = bk
 		return nil
 	}
 	for _, s := range buckets {
-		if err := add(s, false); err != nil {
+		if err := add(s, kindPlain); err != nil {
 			return err
 		}
 	}
 	for _, s := range snaps {
-		if err := add(s, true); err != nil {
+		if err := add(s, kindSnap); err != nil {
+			return err
+		}
+	}
+	for _, s := range rusts {
+		if err := add(s, kindRust); err != nil {
+			return err
+		}
+	}
+	for _, s := range rustsnaps {
+		if err := add(s, kindRustSnap); err != nil {
 			return err
 		}
 	}

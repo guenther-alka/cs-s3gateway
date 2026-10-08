@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- New bucket types `--rust` / `--rustsnaps`: read RustFS on-disk data (xl.meta, inline data, multipart) and present objects as normal files, also inside ZFS snapshots.
+- Objects the reader cannot decode (compressed, encrypted, tiered, multi disk) answer 501 with a reason.
+- ETag and content type of RustFS objects come from the metadata.
+
 ## 0.2.1
 
 Security audit, see [SECURITY.md](SECURITY.md):

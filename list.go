@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,6 +17,40 @@ type bucket struct {
 	name string
 	path string
 	root *os.Root
+	kind int // kindPlain, kindRust, kindRustSnap
+	// bucketIdx: depth of the RustFS bucket folder below the root (0 = root is the RustFS data
+	// folder, 1 = root is a snapshot folder holding the RustFS buckets).
+	bucketIdx int
+}
+
+// fileMeta is what a listing needs from a file.
+type fileMeta struct {
+	size  int64
+	mtime time.Time
+	etag  string
+	ok    bool
+}
+
+// object is an opened object ready to be served.
+type object struct {
+	r     io.ReadSeeker
+	close func() error
+	size  int64
+	mtime time.Time
+	etag  string
+	ctype string
+}
+
+// openObject opens a key for reading, whatever the bucket kind.
+func (b *bucket) openObject(key string) (*object, error) {
+	if b.kind != kindPlain {
+		return b.openRust(key)
+	}
+	f, st, err := b.openRegular(key)
+	if err != nil {
+		return nil, err
+	}
+	return &object{r: f, close: f.Close, size: st.Size(), mtime: st.ModTime()}, nil
 }
 
 type entry struct {
@@ -23,6 +58,7 @@ type entry struct {
 	isPrefix bool
 	size     int64
 	mtime    time.Time
+	etag     string // optional, real ETag (RustFS objects)
 }
 
 // validName: names that cannot be addressed or XML-encoded safely are invisible.
@@ -104,11 +140,14 @@ func (b *bucket) openRegular(key string) (*os.File, fs.FileInfo, error) {
 type child struct {
 	name  string
 	isDir bool
-	de    fs.DirEntry
+	stat  func() fileMeta
 }
 
 // readDir lists the valid children (regular files and directories only, no symlinks).
 func (b *bucket) readDir(dirKey string) []child {
+	if b.kind != kindPlain {
+		return b.readDirRust(dirKey)
+	}
 	rel := "."
 	if dirKey != "" {
 		rel = relPath(strings.TrimSuffix(dirKey, "/"))
@@ -131,20 +170,30 @@ func (b *bucket) readDir(dirKey string) []child {
 		t := de.Type()
 		switch {
 		case t.IsDir():
-			out = append(out, child{n, true, de})
+			out = append(out, child{name: n, isDir: true})
 		case t.IsRegular():
-			out = append(out, child{n, false, de})
+			de := de
+			out = append(out, child{name: n, stat: func() fileMeta {
+				info, err := de.Info()
+				if err != nil || !info.Mode().IsRegular() {
+					return fileMeta{}
+				}
+				return fileMeta{size: info.Size(), mtime: info.ModTime(), ok: true}
+			}})
 		}
 	}
 	return out
 }
 
-func fileEntry(key string, de fs.DirEntry) (entry, bool) {
-	info, err := de.Info()
-	if err != nil || !info.Mode().IsRegular() {
+func fileEntry(key string, c child) (entry, bool) {
+	if c.stat == nil {
 		return entry{}, false
 	}
-	return entry{key: key, size: info.Size(), mtime: info.ModTime()}, true
+	m := c.stat()
+	if !m.ok {
+		return entry{}, false
+	}
+	return entry{key: key, size: m.size, mtime: m.mtime, etag: m.etag}, true
 }
 
 // list returns up to max entries (keys and common prefixes) in key order, all > marker.
@@ -200,7 +249,7 @@ func (b *bucket) listOneLevel(prefix, marker string, max int) ([]entry, bool) {
 			e = entry{key: cd.emit, isPrefix: true}
 		} else {
 			var ok bool
-			if e, ok = fileEntry(cd.emit, cd.c.de); !ok {
+			if e, ok = fileEntry(cd.emit, cd.c); !ok {
 				continue
 			}
 		}
@@ -280,7 +329,7 @@ func (w *walker) walk(dirKey string) bool {
 				continue
 			}
 		}
-		e, ok := fileEntry(key, c.de)
+		e, ok := fileEntry(key, c)
 		if !ok {
 			continue
 		}

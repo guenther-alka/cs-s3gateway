@@ -365,9 +365,13 @@ func (g *gateway) handleList(w http.ResponseWriter, r *http.Request, b *bucket) 
 			prefixes = append(prefixes, commonPrefix{esc(e.key)})
 			continue
 		}
-		sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", e.size, e.mtime.UnixNano())))
+		etag := e.etag
+		if etag == "" {
+			sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", e.size, e.mtime.UnixNano())))
+			etag = hex.EncodeToString(sum[:16])
+		}
 		contents = append(contents, content{esc(e.key), e.mtime.UTC().Format("2006-01-02T15:04:05.000Z"),
-			`"` + hex.EncodeToString(sum[:16]) + `"`, e.size, "STANDARD"})
+			`"` + etag + `"`, e.size, "STANDARD"})
 	}
 	last := ""
 	if len(items) > 0 {
@@ -379,16 +383,16 @@ func (g *gateway) handleList(w http.ResponseWriter, r *http.Request, b *bucket) 
 		Xmlns          string   `xml:"xmlns,attr"`
 		Name           string
 		Prefix         string
-		KeyCount       *int     `xml:",omitempty"`
+		KeyCount       *int `xml:",omitempty"`
 		MaxKeys        int
-		Delimiter      string   `xml:",omitempty"`
-		EncodingType   string   `xml:",omitempty"`
+		Delimiter      string `xml:",omitempty"`
+		EncodingType   string `xml:",omitempty"`
 		IsTruncated    bool
-		ContinuationTk string   `xml:"ContinuationToken,omitempty"`
-		NextContinuTk  string   `xml:"NextContinuationToken,omitempty"`
-		StartAfter     string   `xml:"StartAfter,omitempty"`
-		Marker         *string  `xml:"Marker,omitempty"`
-		NextMarker     string   `xml:"NextMarker,omitempty"`
+		ContinuationTk string  `xml:"ContinuationToken,omitempty"`
+		NextContinuTk  string  `xml:"NextContinuationToken,omitempty"`
+		StartAfter     string  `xml:"StartAfter,omitempty"`
+		Marker         *string `xml:"Marker,omitempty"`
+		NextMarker     string  `xml:"NextMarker,omitempty"`
 		Contents       []content
 		CommonPrefixes []commonPrefix
 	}
@@ -416,8 +420,13 @@ func (g *gateway) handleList(w http.ResponseWriter, r *http.Request, b *bucket) 
 
 func (g *gateway) getObject(w http.ResponseWriter, r *http.Request, b *bucket, key string) {
 	nokey := &apiErr{404, "NoSuchKey", "The specified key does not exist."}
-	f, st, err := b.openRegular(key)
+	o, err := b.openObject(key)
 	if err != nil {
+		var u *errUnsupported
+		if errors.As(err, &u) {
+			writeErr(w, r, &apiErr{501, "NotImplemented", "object cannot be read by this gateway: " + u.msg})
+			return
+		}
 		if errors.Is(err, fs.ErrPermission) {
 			writeErr(w, r, errDenied("Access Denied"))
 		} else {
@@ -425,13 +434,17 @@ func (g *gateway) getObject(w http.ResponseWriter, r *http.Request, b *bucket, k
 		}
 		return
 	}
-	defer f.Close()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", st.Size(), st.ModTime().UnixNano())))
+	defer o.close()
+	etag := o.etag
+	if etag == "" {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", o.size, o.mtime.UnixNano())))
+		etag = hex.EncodeToString(sum[:16])
+	}
 	h := w.Header()
-	h.Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
+	h.Set("ETag", `"`+etag+`"`)
 	ct := mime.TypeByExtension(strings.ToLower(path.Ext(key)))
 	if ct == "" {
-		ct = "application/octet-stream"
+		ct = storedType(o.ctype)
 	}
 	h.Set("Content-Type", ct)
 	// a presigned URL opened in a browser must never run a file as a page of the gateway origin
@@ -446,7 +459,7 @@ func (g *gateway) getObject(w http.ResponseWriter, r *http.Request, b *bucket, k
 		h.Set("Content-Disposition", "attachment")
 	}
 	h.Set("x-amz-storage-class", "STANDARD")
-	http.ServeContent(w, r, "", st.ModTime(), f)
+	http.ServeContent(w, r, "", o.mtime, o.r)
 }
 
 func sortedNames(m map[string]*bucket) []string {
@@ -456,4 +469,13 @@ func sortedNames(m map[string]*bucket) []string {
 	}
 	sort.Strings(n)
 	return n
+}
+
+// storedType accepts a content type stored with a RustFS object only if it is a plain media type.
+func storedType(t string) string {
+	mt, _, err := mime.ParseMediaType(t)
+	if err != nil || mt == "" {
+		return "application/octet-stream"
+	}
+	return mt
 }

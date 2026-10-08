@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
@@ -171,13 +172,21 @@ var inlineTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/
 	"application/pdf": true, "text/plain": true}
 
 func (g *gateway) browseFile(w http.ResponseWriter, r *http.Request, b *bucket, key string) {
-	f, st, err := b.openRegular(key)
+	o, err := b.openObject(key)
 	if err != nil {
+		var u *errUnsupported
+		if errors.As(err, &u) {
+			http.Error(w, "object cannot be read by this gateway: "+u.msg, http.StatusNotImplemented)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	defer f.Close()
+	defer o.close()
 	ct := mime.TypeByExtension(strings.ToLower(path.Ext(key)))
+	if ct == "" {
+		ct = storedType(o.ctype)
+	}
 	if i := strings.IndexByte(ct, ';'); i >= 0 {
 		ct = ct[:i]
 	}
@@ -193,5 +202,5 @@ func (g *gateway) browseFile(w http.ResponseWriter, r *http.Request, b *bucket, 
 	if !inlineTypes[ct] || r.URL.Query().Get("dl") == "1" {
 		h.Set("Content-Disposition", "attachment; filename*=UTF-8''"+awsEncode(path.Base(key), true))
 	}
-	http.ServeContent(w, r, "", st.ModTime(), f)
+	http.ServeContent(w, r, "", o.mtime, o.r)
 }

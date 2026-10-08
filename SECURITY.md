@@ -46,3 +46,9 @@ config file or the process list (`CS_S3GW_SECRET_KEY`).
   request (requires write access to the exported folder).
 * Aliases of a file name (`a.txt.`, `A.TXT`, `LONGFO~1`) read the same file on Windows.
 * Running as root/Administrator: a memory-safety bug in Go's standard library would have that reach. Keep Go current.
+
+## RustFS reader (0.3.0)
+
+- The xl.meta parser is a bounded msgpack decoder (size cap, panics are recovered and answered as 501).
+- RustFS internals (`.rustfs.sys`, `xl.meta`, part files, anything inside an object folder) are neither listed nor addressable; all file access still goes through os.Root.
+- Stored content types are reduced to a plain media type; the sandbox CSP and attachment rules for active types apply as for all files.

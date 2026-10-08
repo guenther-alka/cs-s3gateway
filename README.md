@@ -258,3 +258,18 @@ bucket name validation and the web page (login, HTML escaping, download headers,
 ## License
 
 BSD 2-Clause, see [LICENSE](LICENSE). Changes: [CHANGELOG.md](CHANGELOG.md).
+
+## RustFS data (v0.3.0)
+
+RustFS keeps objects in its own format (a folder per object with `xl.meta` plus part files), not as plain files. Two bucket types read this format directly and present the objects as normal files:
+
+```
+cs-s3gateway --rust name=/s3_storage                 # a RustFS data folder: <rustfs-bucket>/<object>
+cs-s3gateway --rustsnaps name=/tank/s3_storage       # <dataset>/.zfs/snapshot/<snapshot>/<rustfs-bucket>/<object>
+```
+
+In the napp-it CS menu use the bucket line types `rust:name=path` and `rustsnap:name=path`, for example `rustsnap:s3-storage-snaps=d:/s3_storage`.
+
+Supported: single disk RustFS (`xl.meta` v2, inline data, multipart objects), nested keys, the latest version of versioned objects (delete markers hide the object), real ETag and content type from the metadata. The internal folders (`.rustfs.sys`, `xl.meta`, part files) are never visible or addressable.
+
+Not supported (listed, but GET answers 501 with a reason): compressed or encrypted objects, tiered objects, erasure coded data spread over several disks. The bitrot checksums of the part files are skipped, not verified. Older versions of an object are not served.
