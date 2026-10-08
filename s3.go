@@ -13,6 +13,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"path"
 	"sort"
 	"strconv"
@@ -59,19 +60,47 @@ type failState struct {
 
 func newLimiter() *limiter { return &limiter{m: map[string]*failState{}} }
 
+// limitKey maps a client address to the limiter key: IPv6 clients are grouped by /64
+// (one subscriber owns a whole /64 and could otherwise rotate addresses to dodge the limit).
+func limitKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		if p, err := a.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return a.String()
+}
+
 func (l *limiter) isBlocked(ip string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	f := l.m[ip]
+	f := l.m[limitKey(ip)]
 	return f != nil && now.Before(f.blocked)
 }
 
 // fail counts a failed authentication; 10 failures within a minute block the address for a minute.
 func (l *limiter) fail(ip string, now time.Time) {
+	ip = limitKey(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.m) > 4096 { // keep it bounded
-		l.m = map[string]*failState{}
+	if len(l.m) > 4096 { // keep it bounded: drop expired entries, never active blocks
+		for k, f := range l.m {
+			if now.Sub(f.first) > time.Minute && !now.Before(f.blocked) {
+				delete(l.m, k)
+			}
+		}
+		if len(l.m) > 8192 { // flood of distinct sources: forget the oldest-looking half only as a last resort
+			for k, f := range l.m {
+				if !now.Before(f.blocked) {
+					delete(l.m, k)
+				}
+			}
+		}
 	}
 	f := l.m[ip]
 	if f == nil || now.Sub(f.first) > time.Minute {
@@ -405,6 +434,17 @@ func (g *gateway) getObject(w http.ResponseWriter, r *http.Request, b *bucket, k
 		ct = "application/octet-stream"
 	}
 	h.Set("Content-Type", ct)
+	// a presigned URL opened in a browser must never run a file as a page of the gateway origin
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	base := ct
+	if i := strings.IndexByte(base, ';'); i >= 0 {
+		base = base[:i]
+	}
+	if !inlineTypes[base] {
+		h.Set("Content-Disposition", "attachment")
+	}
 	h.Set("x-amz-storage-class", "STANDARD")
 	http.ServeContent(w, r, "", st.ModTime(), f)
 }

@@ -213,6 +213,8 @@ sync tools that compare size and time. Tools that insist on MD5 ETags can use th
   names, active content types are download-only, log lines print the request path quoted (`%q`).
 * **Least privilege.** Run the service as an unprivileged user that can read the exported folders and the
   `_cfg` files and nothing else. The secret is not logged and not stored in the config file.
+* **Audited.** Findings, fixes and known limitations: [SECURITY.md](SECURITY.md). Buckets that would expose the napp-it
+  `_cfg` folder (server.auth, TLS key) are refused, `.zfs` stays hidden under every alias on Windows/macOS.
 * **Idle timeout.** `--idle-timeout` makes the service end itself - an on-demand service is not an open port all day.
 * **Exposure.** The gateway is meant for a trusted LAN/VPN or behind a reverse proxy. If you publish it to the
   internet, use HTTPS and a firewall/IP restriction as for any admin interface - it uses the *admin* credentials of

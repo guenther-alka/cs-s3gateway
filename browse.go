@@ -40,7 +40,9 @@ func isBrowseRequest(r *http.Request) bool {
 func htmlPage(w http.ResponseWriter, title, body string) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Cache-Control", "private, no-store")
@@ -80,7 +82,10 @@ func (g *gateway) browse(w http.ResponseWriter, r *http.Request, ip string) bool
 		return false
 	}
 	if !g.basicOK(r) {
-		g.lim.fail(ip, g.now())
+		// the first request of a browser carries no credentials at all: that is the login challenge, not a failed login
+		if _, _, sent := r.BasicAuth(); sent {
+			g.lim.fail(ip, g.now())
+		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="cs-s3gateway", charset="UTF-8"`)
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return false
@@ -121,7 +126,7 @@ func (g *gateway) browseDir(w http.ResponseWriter, r *http.Request, b *bucket, p
 				return
 			}
 		}
-		if strings.HasPrefix(prefix, ".zfs/") || prefix == ".zfs/" {
+		if b.topHidden(prefix) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -183,6 +188,7 @@ func (g *gateway) browseFile(w http.ResponseWriter, r *http.Request, b *bucket, 
 	h.Set("Content-Type", ct)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("Cache-Control", "private, no-store")
 	if !inlineTypes[ct] || r.URL.Query().Get("dl") == "1" {
 		h.Set("Content-Disposition", "attachment; filename*=UTF-8''"+awsEncode(path.Base(key), true))

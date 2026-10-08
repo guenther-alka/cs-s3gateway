@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -71,6 +72,43 @@ func applyConf(file string) error {
 // snapPath returns the ZFS snapshot directory of a mounted dataset.
 func snapPath(dataset string) string {
 	return filepath.Join(dataset, ".zfs", "snapshot")
+}
+
+// realAbs is an absolute, symlink-resolved (best effort) path; folded to lower case where the file system
+// is normally case-insensitive.
+func realAbs(p string) string {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		a = p
+	}
+	if r, err := filepath.EvalSymlinks(a); err == nil {
+		a = r
+	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		a = strings.ToLower(a)
+	}
+	return filepath.Clean(a)
+}
+
+// isUnder reports whether p is root itself or lies below it.
+func isUnder(root, p string) bool {
+	rel, err := filepath.Rel(realAbs(root), realAbs(p))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// exposes returns the first protected file/folder (napp-it _cfg with server.auth and the TLS key ...)
+// that a bucket rooted at root would make readable. server.auth holds more than the S3 secret
+// (cluster/crypto key), so it must never be served, not even through an old snapshot.
+func exposes(root string, protected []string) string {
+	for _, p := range protected {
+		if p != "" && isUnder(root, p) {
+			return p
+		}
+	}
+	return ""
 }
 
 func isDir(p string) bool {

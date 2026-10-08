@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 type stringList []string
 
@@ -118,13 +118,24 @@ func run() error {
 	if g.maxKeys < 1 || g.maxKeys > 1000 {
 		g.maxKeys = 1000
 	}
+	protected := []string{filepath.Join(*base, "_cfg")}
+	if *credsFrom != "" {
+		protected = append(protected, *credsFrom)
+	}
+	if *keyF != "" {
+		protected = append(protected, *keyF)
+	}
 	add := func(spec string, snap bool) error {
 		name, p, err := parseSpec(spec)
 		if err != nil {
 			return err
 		}
+		dsRoot := p // for snapshots the whole dataset counts: old snapshots contain old copies of the files
 		if snap {
 			p = snapPath(p)
+		}
+		if bad := exposes(dsRoot, protected); bad != "" {
+			return fmt.Errorf("bucket %q: %s would expose %s (napp-it configuration, secrets or TLS key); export a different folder", name, dsRoot, bad)
 		}
 		if g.buckets[name] != nil {
 			return fmt.Errorf("duplicate bucket name %q", name)

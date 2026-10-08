@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+Security audit, see [SECURITY.md](SECURITY.md):
+
+- `.zfs` stays hidden under every alias on case-insensitive / aliasing file systems (`.ZFS`, `.zfs.`, `ZFS~1`)
+- buckets that would expose napp-it's `_cfg` (server.auth, TLS key), also through snapshots of its dataset, are refused at start
+- every file response (S3 GET and web page) carries `CSP: sandbox`, `nosniff`, `CORP`; active types are always `attachment`
+- failed-login limiter: challenge request without credentials no longer counts, IPv6 grouped by /64, table pruning keeps active blocks
+- web pages: `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `base-uri`/`form-action` none
+
 ## 0.2.0
 
 - Built-in read-only web page (`/_browse/`, also `/` for browsers): bucket list, folder listing, download. HTTP Basic login with the same credentials as S3.

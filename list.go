@@ -54,10 +54,32 @@ func validKey(key string) bool {
 
 func relPath(key string) string { return filepath.FromSlash(key) }
 
+// topHidden reports whether the first component of a key or prefix is the hidden top level ".zfs" -
+// by name or, on case-insensitive / aliasing file systems (Windows, macOS: ".ZFS", ".zfs.", "ZFS~1"),
+// because it is the very same folder.
+func (b *bucket) topHidden(keyOrPrefix string) bool {
+	first := keyOrPrefix
+	if i := strings.IndexByte(first, '/'); i >= 0 {
+		first = first[:i]
+	}
+	if first == ".zfs" {
+		return true
+	}
+	if first == "" {
+		return false
+	}
+	zi, err := b.root.Lstat(".zfs")
+	if err != nil {
+		return false
+	}
+	ti, err := b.root.Lstat(relPath(first))
+	return err == nil && os.SameFile(zi, ti)
+}
+
 // openRegular opens a key for reading: only regular files (Lstat first: no symlink, and opening a
 // fifo or device would block), always through os.Root.
 func (b *bucket) openRegular(key string) (*os.File, fs.FileInfo, error) {
-	if !validKey(key) {
+	if !validKey(key) || b.topHidden(key) {
 		return nil, nil, fs.ErrNotExist
 	}
 	lst, err := b.root.Lstat(relPath(key))
@@ -148,7 +170,7 @@ func (b *bucket) listOneLevel(prefix, marker string, max int) ([]entry, bool) {
 				return nil, false
 			}
 		}
-		if strings.HasPrefix(dir, ".zfs/") {
+		if b.topHidden(dir) {
 			return nil, false
 		}
 	}
