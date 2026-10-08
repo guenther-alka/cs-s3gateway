@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Login with an own session secret as an alternative to the RustFS secret (`--creds-from <file>`, e.g. created on demand by the napp-it CS menu). The log tells where the secret was read from.
+
 ## 0.3.0
 
 - New bucket types `--rust` / `--rustsnaps`: read RustFS on-disk data (xl.meta, inline data, multipart) and present objects as normal files, also inside ZFS snapshots.

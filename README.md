@@ -80,6 +80,9 @@ Then open `http://127.0.0.1:9100/` in a browser or point an S3 client to `http:/
 By default taken from napp-it CS exactly as the RustFS start script does:
 
 * access key **`s3admin`**, secret = the first 20 bytes of the first line of `<base>/_cfg/server.auth`
+  (the RustFS login), or an own **session secret**: `--creds-from <file> --access-key s3session` with a file that holds a random
+  secret only this gateway knows. The napp-it CS menu creates it on demand (button *new secret*, setting *Login*), stores it in
+  `_cfg/s3gw/s3gw.secret` and shows it in the login window; a new secret revokes the old one and restarts the service
 * certificate / key = `<base>/_cfg/s3/pem/rustfs_cert.pem` and `rustfs_key.pem`
 
 So an S3 client that works with RustFS works with the gateway with the same keys - only the port differs

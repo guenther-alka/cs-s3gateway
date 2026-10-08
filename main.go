@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 // kindSnap only exists while adding buckets: a plain bucket rooted in <dataset>/.zfs/snapshot
 const kindSnap = 100
@@ -112,6 +112,7 @@ func run() error {
 			return fmt.Errorf("no credentials: %w", err)
 		}
 		secret = s
+		logger.Printf("credentials: secret from %s", cf)
 	}
 
 	// buckets
